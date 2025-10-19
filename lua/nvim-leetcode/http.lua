@@ -9,7 +9,28 @@ function M.setup(opts)
 end
 
 function M.get(url)
-  local command = "curl -sL " .. vim.fn.shellescape(url)
+  local LEETCODE_SESSION = config.leetcode_session
+  local CSRF_TOKEN = config.csrf_token
+
+  if not LEETCODE_SESSION or LEETCODE_SESSION == "" then
+    local browser_cookies = get_cookies_from_browser()
+    if browser_cookies then
+      LEETCODE_SESSION = browser_cookies.LEETCODE_SESSION
+      CSRF_TOKEN = browser_cookies.csrftoken
+    end
+  end
+
+  if not LEETCODE_SESSION or not CSRF_TOKEN then
+    vim.notify("LEETCODE_SESSION and csrf_token are missing.", vim.log.levels.ERROR)
+    return ""
+  end
+
+  local command = string.format(
+    "curl -sL -H 'Cookie: LEETCODE_SESSION=%s; csrftoken=%s' %s",
+    LEETCODE_SESSION,
+    CSRF_TOKEN,
+    vim.fn.shellescape(url)
+  )
   local result = vim.fn.system(command)
   return result
 end
@@ -20,27 +41,54 @@ import browser_cookie3
 import json
 import sys
 
+def get_cookies():
+    # List of browser functions to try
+    browsers_to_try = [
+        browser_cookie3.chrome,
+        browser_cookie3.firefox,
+        browser_cookie3.brave,
+        browser_cookie3.edge,
+        browser_cookie3.chromium,
+        browser_cookie3.opera,
+        browser_cookie3.vivaldi,
+        browser_cookie3.safari,
+    ]
+
+    for browser_func in browsers_to_try:
+        try:
+            cj = browser_func(domain_name=".leetcode.com")
+            cookies = {}
+            for cookie in cj:
+                if cookie.name in ["LEETCODE_SESSION", "csrftoken"]:
+                    cookies[cookie.name] = cookie.value
+            
+            if "LEETCODE_SESSION" in cookies and "csrftoken" in cookies:
+                return cookies
+        except Exception:
+            # Ignore exceptions (e.g., browser not found) and try the next one
+            continue
+    
+    return None
+
 try:
-    cj = browser_cookie3.load(domain_name=".leetcode.com")
-    cookies = {}
-    for cookie in cj:
-        if cookie.name in ["LEETCODE_SESSION", "csrftoken"]:
-            cookies[cookie.name] = cookie.value
-    if "LEETCODE_SESSION" not in cookies or "csrftoken" not in cookies:
-        sys.stderr.write("Could not find LeetCode session cookies.")
+    leetcode_cookies = get_cookies()
+    if leetcode_cookies:
+        print(json.dumps(leetcode_cookies))
+    else:
+        sys.stderr.write("Automatic cookie detection failed. Please configure cookies manually.")
         sys.exit(1)
-    print(json.dumps(cookies))
 except Exception as e:
-    sys.stderr.write("Failed to load browser cookies: " + str(e))
+    sys.stderr.write("An unexpected error occurred: " + str(e))
     sys.exit(1)
 ]]
 
-  local python_executable = config.python_executable or "python3"
-  local command = python_executable .. " -c " .. vim.fn.shellescape(python_script)
-
-  if config.venv_activate_path then
-    command = ". " .. vim.fn.shellescape(config.venv_activate_path) .. " && " .. command
+  local python_executable
+  if config.venv_activate_path and vim.fn.isdirectory(config.venv_activate_path) == 1 then
+    python_executable = config.venv_activate_path .. "/bin/python"
+  else
+    python_executable = config.python_executable or "python3"
   end
+  local command = python_executable .. " -c " .. vim.fn.shellescape(python_script)
 
   local result = vim.fn.system(command)
 

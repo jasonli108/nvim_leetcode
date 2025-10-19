@@ -3,6 +3,13 @@
 local M = {}
 local http = require('nvim-leetcode.http')
 
+local config = {
+  leetcode_session = "",
+  csrf_token = "",
+  python_executable = "python3",
+  venv_activate_path = nil,
+}
+
 local PROBLEMS_API_URL = "https://leetcode.com/api/problems/all/"
 local GRAPHQL_API_URL = "https://leetcode.com/graphql"
 
@@ -21,6 +28,40 @@ query questionData($titleSlug: String!) {
   }
 }
 ]]
+
+local SUBMIT_API_URL = "https://leetcode.com/problems/%s/submit/"
+
+function M.submit_solution()
+  local buf = vim.api.nvim_get_current_buf()
+  local filename = vim.api.nvim_buf_get_name(buf)
+  local title_slug = vim.fn.fnamemodify(filename, ":t:r"):gsub("_", "-")
+
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local source_code = table.concat(lines, "\n")
+
+  local submit_url = string.format(SUBMIT_API_URL, title_slug)
+
+  local body = vim.fn.json_encode({
+    lang = "python3",
+    question_id = vim.b.leetcode_question_id,
+    typed_code = source_code,
+  })
+
+  vim.notify("Submitting solution for: " .. title_slug, vim.log.levels.INFO)
+  vim.schedule(function()
+    local response_body = http.post(submit_url, body)
+    if response_body and response_body ~= "" then
+      if string.sub(response_body, 1, 1) == "{" then
+        local data = vim.fn.json_decode(response_body)
+        vim.notify("Submission ID: " .. data.submission_id, vim.log.levels.INFO)
+      else
+        vim.notify("Submission failed. The server returned an error (likely auth-related).", vim.log.levels.ERROR)
+      end
+    else
+      vim.notify("Failed to submit solution. Response was empty.", vim.log.levels.ERROR)
+    end
+  end)
+end
 
 local full_problem_list_cache = {}
 local displayed_problem_list_cache = {}
@@ -58,6 +99,8 @@ local function display_question_in_buffer(data)
     vim.notify("Could not find question data in API response.", vim.log.levels.ERROR)
     return
   end
+
+  vim.b.leetcode_question_id = question.questionId
 
   local safe_slug = question.titleSlug
   if not safe_slug or type(safe_slug) ~= "string" then
@@ -203,7 +246,15 @@ function M.list_problems()
 end
 
 function M.setup(opts)
+  opts = opts or {}
+  for k, v in pairs(opts) do
+    config[k] = v
+  end
+
+  http.setup(config)
+
   vim.api.nvim_create_user_command('LeetCodeList', M.list_problems, { nargs = 0, desc = 'Fetch and list LeetCode problems' })
+  vim.api.nvim_create_user_command('LeetCodeSubmit', M.submit_solution, { nargs = 0, desc = 'Submit the current buffer to LeetCode' })
 end
 
 return M

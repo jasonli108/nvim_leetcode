@@ -9,8 +9,8 @@ function M.setup(opts)
 end
 
 function M.get(url)
-  local LEETCODE_SESSION = config.leetcode_session
-  local CSRF_TOKEN = config.csrf_token
+  local LEETCODE_SESSION = os.getenv("LEETCODE_SESSION")
+  local CSRF_TOKEN = os.getenv("CSRF_TOKEN")
 
   if not LEETCODE_SESSION or LEETCODE_SESSION == "" then
     local browser_cookies = get_cookies_from_browser()
@@ -102,8 +102,8 @@ end
 
 -- New function to handle POST requests with a JSON body
 function M.post(url, body)
-  local LEETCODE_SESSION = config.leetcode_session
-  local CSRF_TOKEN = config.csrf_token
+  local LEETCODE_SESSION = os.getenv("LEETCODE_SESSION")
+  local CSRF_TOKEN = os.getenv("CSRF_TOKEN")
 
   if not LEETCODE_SESSION or LEETCODE_SESSION == "" then
     local browser_cookies = get_cookies_from_browser()

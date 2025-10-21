@@ -13,8 +13,6 @@ local function get_plugin_root()
 end
 
 local config = {
-  leetcode_session = "",
-  csrf_token = "",
   python_executable = "python3",
   venv_activate_path = get_plugin_root() .. "/.venv",
 }
@@ -153,16 +151,40 @@ local function clean_html(html_string)
     return ""
   end
   local s = html_string
-  s = s:gsub("<p>", ""):gsub("</p>", "\n")
-  s = s:gsub("<li>", "- "):gsub("</li>", "\n")
+  s = s:gsub("<p>", ""):gsub("</p>", " ")
+  s = s:gsub("<li>", "- "):gsub("</li>", " ")
   s = s:gsub("<strong>", ""):gsub("</strong>", "")
   s = s:gsub("<em>", ""):gsub("</em>", "")
-  s = s:gsub("<code>", "`"):gsub("</code>", "`")
-  s = s:gsub("<pre>", "\n```\n"):gsub("</pre>", "\n")
+  s = s:gsub("<code>", "`"):gsub("</code>", " ")
+  s = s:gsub("<pre>", " "):gsub("</pre>", " ")
   s = s:gsub("<[^>]+>", "")
   s = s:gsub("&nbsp;", " "); s = s:gsub("&lt;", "<"); s = s:gsub("&gt;", ">")
   s = s:gsub("&quot;", "\""); s = s:gsub("&#39;", "'"); s = s:gsub("&amp;", "&")
-  return s
+  s = s:gsub("%s+", " ")
+  return s:match("^%s*(.-)%s*$")
+end
+
+local function word_wrap(text, line_width)
+  line_width = line_width or 158
+  local lines = {}
+  local current_line = ""
+
+  for word in text:gmatch("%S+") do
+    if #current_line + #word + 1 > line_width then
+      table.insert(lines, current_line)
+      current_line = word
+    else
+      if current_line == "" then
+        current_line = word
+      else
+        current_line = current_line .. " " .. word
+      end
+    end
+  end
+  if current_line ~= "" then
+    table.insert(lines, current_line)
+  end
+  return lines
 end
 
   local function get_difficulty(level)
@@ -218,10 +240,9 @@ end
       "",
     }
     vim.list_extend(file_content, description_header)
-    local cleaned_content_lines = vim.split(clean_html(question.content), "\n")
-    vim.list_extend(file_content, cleaned_content_lines)
+    local wrapped_content = word_wrap(clean_html(question.content))
+    vim.list_extend(file_content, wrapped_content)
     table.insert(file_content, '"""')
-    table.insert(file_content, "")
     local snippet_lines = vim.split(python_snippet, "\n")
     vim.list_extend(file_content, snippet_lines)
 

@@ -105,3 +105,11 @@ To run the tests, you will need to have `make` installed. Then, you can run the 
 ```bash
 make test
 ```
+
+## To use it
+
+loging to leetcode, developer tool, go to application, go to cookies, find leetcode.com, find LEETCODE_SESSION and csrftoken
+set -Ux CSRF_TOKEN leetcode_token
+set -UX LEETCODE_SESSION your_session_token
+
+:LeetCode to load the questions and :LeetCodeSubmit to submit your solution

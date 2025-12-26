@@ -26,7 +26,14 @@ function M.get(url)
   end
 
   local command = string.format(
-    "curl -sL -H 'Cookie: LEETCODE_SESSION=%s; csrftoken=%s' %s",
+    "curl -sL --compressed " ..
+    "-A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36' " ..
+    "-H 'Cookie: LEETCODE_SESSION=%s; csrftoken=%s' " ..
+    "-H 'Accept: application/json, text/javascript, */*; q=0.01' " ..
+    "-H 'Accept-Language: en-US,en;q=0.5' " ..
+    "-H 'Accept-Encoding: gzip, deflate, br' " ..
+    "-H 'Connection: keep-alive' " ..
+    "-H 'X-Requested-With: XMLHttpRequest' %s",
     LEETCODE_SESSION,
     CSRF_TOKEN,
     vim.fn.shellescape(url)
@@ -121,19 +128,29 @@ function M.post(url, body)
     return ""
   end
 
-  local referer_url = url:gsub("/submit/$", "/")
+  local referer_header = ""
+  if url:match("/problems/") then
+    local referer_url = url:gsub("/submit/$", "/"):gsub("/test/$", "/")
+    referer_header = string.format("-H 'referer: %s' ", referer_url)
+  end
 
   local command = string.format(
-    "curl -sL -X POST " ..
+    "curl -sL --compressed -X POST " ..
+    "-A 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36' " ..
     "-H 'Content-Type: application/json' " ..
     "-H 'x-csrftoken: %s' " ..
     "-H 'Cookie: LEETCODE_SESSION=%s; csrftoken=%s' " ..
-    "-H 'referer: %s' " ..
+    referer_header ..
+    "-H 'Accept: application/json, text/javascript, */*; q=0.01' " ..
+    "-H 'Accept-Language: en-US,en;q=0.5' " ..
+    "-H 'Accept-Encoding: gzip, deflate, br' " ..
+    "-H 'Connection: keep-alive' " ..
+    "-H 'X-Requested-With: XMLHttpRequest' " ..
+    "-H 'Origin: https://leetcode.com' " ..
     "-d %s %s",
     CSRF_TOKEN,
     LEETCODE_SESSION,
     CSRF_TOKEN,
-    vim.fn.shellescape(referer_url),
     vim.fn.shellescape(body),
     vim.fn.shellescape(url)
   )

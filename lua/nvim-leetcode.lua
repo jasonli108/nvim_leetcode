@@ -4,6 +4,9 @@ local M = {}
 
 local function split_and_insert(lines, text)
 	if text then
+		if type(text) ~= "string" then
+			text = tostring(text)
+		end
 		for _, line in ipairs(vim.split(text, "\n")) do
 			table.insert(lines, line)
 		end
@@ -147,7 +150,18 @@ query submissionDetails($submissionId: Int!) {
     totalCorrect
     totalTestcases
     notes
+    runtimeError
+    compileError
     lastTestcase
+    codeOutput
+    expectedOutput
+    totalCorrect
+    totalTestcases
+    fullCodeOutput
+    testDescriptions
+    testBodies
+    testInfo
+    stdOutput
   }
 }
 ]=]
@@ -220,6 +234,16 @@ local function display_history_in_buffer(submissions)
 	})
 end
 
+local function find_buf_by_name(name)
+	local bufs = vim.api.nvim_list_bufs()
+	for _, buf in ipairs(bufs) do
+		if vim.api.nvim_buf_is_loaded(buf) and vim.api.nvim_buf_get_name(buf):match(name .. "$") then
+			return buf
+		end
+	end
+	return nil
+end
+
 local function display_submission_results(details)
 	local lines = { "Submission Details", "------------------" }
 	table.insert(lines, "Status: " .. details.runtimeDisplay)
@@ -228,6 +252,16 @@ local function display_submission_results(details)
 	table.insert(lines, "Memory: " .. details.memory)
 	if details.totalCorrect and details.totalTestcases then
 		table.insert(lines, string.format("Test Cases: %d / %d", details.totalCorrect, details.totalTestcases))
+	end
+	if details.runtimeError and details.runtimeError ~= "" then
+		table.insert(lines, "------------------")
+		table.insert(lines, "Runtime Error:")
+		split_and_insert(lines, details.runtimeError)
+	end
+	if details.notes and details.notes ~= "" then
+		table.insert(lines, "------------------")
+		table.insert(lines, "Notes:")
+		split_and_insert(lines, details.notes)
 	end
 	if details.lastTestcase and details.lastTestcase ~= "" then
 		local success, last_testcase_data = pcall(vim.fn.json_decode, details.lastTestcase)
@@ -263,11 +297,15 @@ local function display_submission_results(details)
 	local extension = get_lang_extension(details.lang.name)
 	local filename = details.question.titleSlug:gsub("-", "_") .. "." .. extension
 
-	local buf = vim.api.nvim_create_buf(true, false)
-	vim.api.nvim_buf_set_name(buf, filename)
+	local buf = find_buf_by_name(filename)
+	if not buf then
+		buf = vim.api.nvim_create_buf(true, false)
+		vim.api.nvim_buf_set_name(buf, filename)
+	end
+
 	vim.api.nvim_buf_set_option(buf, "modifiable", true)
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-	vim.api.nvim_buf_set_option(buf, "readonly", false)
+	vim.api.nvim_buf_set_option(buf, "readonly", true)
 	vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
 	vim.bo[buf].filetype = extension
 	vim.cmd("vs | buffer " .. buf)
@@ -277,7 +315,7 @@ function M.get_submission_details(submission_id)
 	vim.notify("Fetching submission details for " .. submission_id .. "...", vim.log.levels.INFO)
 	local body = vim.fn.json_encode({
 		query = SUBMISSION_DETAILS_QUERY_TEMPLATE,
-		variables = { submissionId = submission_id },
+		variables = { submissionId = tonumber(submission_id) },
 	})
 	vim.schedule(function()
 		local response_body = http.post(GRAPHQL_API_URL, body)
@@ -647,6 +685,7 @@ function M.get_question(slug)
 				vim.api.nvim_buf_set_option(buf, "readonly", false)
 				vim.api.nvim_buf_set_lines(buf, 0, -1, false, file_content)
 				vim.api.nvim_buf_set_option(buf, "filetype", "python")
+				vim.b[buf].leetcode_question_id = qid
 			else
 				vim.notify("Could not parse question data from API response.", vim.log.levels.ERROR)
 				print(vim.inspect(data))
@@ -655,6 +694,138 @@ function M.get_question(slug)
 			vim.notify("Failed to fetch question. Response was empty.", vim.log.levels.ERROR)
 		end
 	end)
+end
+
+local function append_submission_results_to_buffer(submission_id)
+	vim.notify("Fetching submission details for " .. submission_id .. "...", vim.log.levels.INFO)
+	local body = vim.fn.json_encode({
+		query = SUBMISSION_DETAILS_QUERY_TEMPLATE,
+		variables = { submissionId = tonumber(submission_id) },
+	})
+	vim.schedule(function()
+		local response_body = http.post(GRAPHQL_API_URL, body)
+		if response_body and response_body ~= "" then
+			local data = vim.fn.json_decode(response_body)
+			if data and data.data and data.data.submissionDetails then
+				local details = data.data.submissionDetails
+				local lines_to_insert = { "", string.rep("-", 80), "" }
+				table.insert(lines_to_insert, "Submission Details (ID: " .. submission_id .. ")")
+				table.insert(lines_to_insert, "------------------")
+				table.insert(lines_to_insert, "Status: " .. details.runtimeDisplay)
+				table.insert(lines_to_insert, "Language: " .. details.lang.name)
+				table.insert(lines_to_insert, "Runtime: " .. details.runtime)
+				table.insert(lines_to_insert, "Memory: " .. details.memory)
+				if details.totalCorrect and details.totalTestcases then
+					table.insert(
+						lines_to_insert,
+						string.format("Test Cases: %d / %d", details.totalCorrect, details.totalTestcases)
+					)
+				end
+				table.insert(lines_to_insert, "------------------")
+				table.insert(lines_to_insert, "Last Test Case:")
+				table.insert(lines_to_insert, "Input:")
+				split_and_insert(lines_to_insert, details.lastTestcase)
+				table.insert(lines_to_insert, "Expected:")
+				split_and_insert(lines_to_insert, details.expectedOutput)
+				table.insert(lines_to_insert, "Actual:")
+				split_and_insert(lines_to_insert, details.codeOutput)
+				table.insert(lines_to_insert, "------------------")
+				table.insert(lines_to_insert, "compileError:")
+				split_and_insert(lines_to_insert, details.compileError)
+				table.insert(lines_to_insert, "fullCodeOutput:")
+				split_and_insert(lines_to_insert, details.fullCodeOutput)
+				table.insert(lines_to_insert, "runtime:")
+				split_and_insert(lines_to_insert, details.runtime)
+				table.insert(lines_to_insert, "runtimeDisplay:")
+				split_and_insert(lines_to_insert, details.runtimeDisplay)
+				table.insert(lines_to_insert, "runtimeError:")
+				split_and_insert(lines_to_insert, details.runtimeError)
+				table.insert(lines_to_insert, "stdOutput:")
+				split_and_insert(lines_to_insert, details.stdOutput)
+
+				local buf = vim.api.nvim_get_current_buf()
+				local all_buffer_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+				local insertion_line = 0
+				for i, line in ipairs(all_buffer_lines) do
+					if line:match('^"""$') and i > 1 then -- Find the closing triple quote of the docstring
+						insertion_line = i
+						break
+					end
+				end
+
+				if insertion_line == 0 then
+					-- Fallback to appending at the end if docstring not found
+					insertion_line = #all_buffer_lines
+				end
+
+				local comment_prefix = get_comment_prefix(vim.bo[buf].filetype)
+				for i, line in ipairs(lines_to_insert) do
+					lines_to_insert[i] = comment_prefix .. " " .. line
+				end
+				vim.api.nvim_buf_set_option(buf, "modifiable", true)
+				vim.api.nvim_buf_set_lines(buf, insertion_line, insertion_line, false, lines_to_insert)
+				vim.notify("Submission results appended to the current buffer.")
+			else
+				vim.notify("Could not parse submission details from API response.", vim.log.levels.ERROR)
+				print(vim.inspect(data))
+			end
+		else
+			vim.notify("Failed to fetch submission details. Response was empty.", vim.log.levels.ERROR)
+		end
+	end)
+end
+
+local function poll_submission_status(submission_id)
+	local check_url = string.format(CHECK_API_URL, submission_id)
+	local timer = vim.loop.new_timer()
+	local attempts = 0
+	local max_attempts = 60 -- 120 seconds timeout
+	local is_finished = false
+
+	local function stop_timer()
+		if not timer:is_closing() then
+			timer:stop()
+			timer:close()
+		end
+	end
+
+	local function check_status()
+		if is_finished then
+			return
+		end
+
+		attempts = attempts + 1
+		if attempts > max_attempts then
+			vim.notify("Timeout waiting for submission result.", vim.log.levels.ERROR)
+			is_finished = true
+			stop_timer()
+			return
+		end
+
+		local response_body = http.get(check_url)
+		if response_body and response_body ~= "" then
+			local data = vim.fn.json_decode(response_body)
+			if data and data.state then
+				if data.state == "PENDING" or data.state == "STARTED" then
+					vim.notify("Submission status: " .. data.state, vim.log.levels.INFO)
+				else
+					is_finished = true
+					stop_timer()
+					append_submission_results_to_buffer(submission_id)
+				end
+			else
+				vim.notify("Could not parse submission status.", vim.log.levels.ERROR)
+				is_finished = true
+				stop_timer()
+			end
+		else
+			vim.notify("Failed to fetch submission status.", vim.log.levels.ERROR)
+			is_finished = true
+			stop_timer()
+		end
+	end
+
+	timer:start(0, 2000, vim.schedule_wrap(check_status))
 end
 
 function M.submit_solution()
@@ -684,6 +855,16 @@ function M.submit_solution()
 	local question_id = vim.b[buf].leetcode_question_id
 
 	if not question_id then
+		for _, line in ipairs(all_lines) do
+			local found_id = line:match("^ID:%s*(%d+)")
+			if found_id then
+				question_id = found_id
+				break
+			end
+		end
+	end
+
+	if not question_id then
 		vim.notify("Could not determine Question ID. Please open a problem first.", vim.log.levels.ERROR)
 		return
 	end
@@ -702,6 +883,7 @@ function M.submit_solution()
 				local data = vim.fn.json_decode(response_body)
 				if data and data.submission_id then
 					vim.notify("Submission ID: " .. data.submission_id, vim.log.levels.INFO)
+					poll_submission_status(data.submission_id)
 				else
 					vim.notify("Submission failed or is pending. API Response:", vim.log.levels.ERROR)
 					print(vim.inspect(data))
@@ -729,9 +911,9 @@ function M.setup(opts)
 	-- 	M.get_question(opts.args)
 	-- end, { nargs = 1 })
 	vim.api.nvim_create_user_command("LeetCodeHistory", M.get_practice_history, {})
-	-- vim.api.nvim_create_user_command("LeetCodeSubmissionDetails", function(opts)
-	-- 	M.get_submission_details(opts.args)
-	-- end, { nargs = 1 })
+	vim.api.nvim_create_user_command("LeetCodeSubmissionDetails", function(opts)
+		M.get_submission_details(opts.args)
+	end, { nargs = 1 })
 end
 
 return M

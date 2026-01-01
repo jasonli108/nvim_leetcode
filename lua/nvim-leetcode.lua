@@ -901,6 +901,161 @@ function M.submit_solution()
 	end)
 end
 
+function M.get_inorder_question(difficulty_filter)
+	if
+		not difficulty_filter
+		or (
+			difficulty_filter:lower() ~= "easy"
+			and difficulty_filter:lower() ~= "medium"
+			and difficulty_filter:lower() ~= "hard"
+		)
+	then
+		vim.notify("Invalid difficulty. Please use Easy, Medium, or Hard.", vim.log.levels.ERROR)
+		return
+	end
+
+	local function find_next_unsolved_and_get()
+		local filtered_problems = {}
+		for _, problem in ipairs(full_problem_list_cache) do
+			if
+				get_difficulty(problem.difficulty.level):lower() == difficulty_filter:lower()
+				and problem.paid_only == false
+			then
+				table.insert(filtered_problems, problem)
+			end
+		end
+
+		table.sort(filtered_problems, function(a, b)
+			return a.stat.frontend_question_id < b.stat.frontend_question_id
+		end)
+
+		local files_in_dir = {}
+		for _, file in ipairs(vim.fn.readdir(vim.fn.getcwd())) do
+			files_in_dir[file] = true
+		end
+
+		local found_unsolved = false
+		for _, problem in ipairs(filtered_problems) do
+			local slug = problem.stat.question__title_slug
+			local filename = slug:gsub("-", "_") .. ".py" -- Assuming python for now
+			if not files_in_dir[filename] then
+				vim.notify("Found unsolved problem: " .. slug, vim.log.levels.INFO)
+				M.get_question(slug)
+				found_unsolved = true
+				break
+			end
+		end
+
+		if not found_unsolved then
+			vim.notify(
+				"All " .. difficulty_filter .. " problems are already present in this directory.",
+				vim.log.levels.INFO
+			)
+		end
+	end
+
+	if #full_problem_list_cache == 0 then
+		vim.notify("Problem list is empty. Fetching from LeetCode...", vim.log.levels.INFO)
+		vim.schedule(function()
+			local response_body = http.get(PROBLEMS_API_URL)
+			if response_body and response_body ~= "" then
+				local data = vim.fn.json_decode(response_body)
+				if data and data.stat_status_pairs then
+					full_problem_list_cache = data.stat_status_pairs
+					find_next_unsolved_and_get()
+				else
+					vim.notify("Could not parse problem list from API response.", vim.log.levels.ERROR)
+				end
+			else
+				vim.notify("Failed to fetch problem list. Response was empty.", vim.log.levels.ERROR)
+			end
+		end)
+	else
+		find_next_unsolved_and_get()
+	end
+end
+
+function M.get_random_question(difficulty_filter)
+	local function find_random_unsolved_and_get()
+		local filtered_problems = {}
+		if not difficulty_filter or difficulty_filter:lower() == "all" then
+			-- No filter or 'all', so use all problems
+			for _, problem in ipairs(full_problem_list_cache) do
+				if problem.paid_only == false then
+					table.insert(filtered_problems, problem)
+				end
+			end
+		else
+			if
+				difficulty_filter:lower() ~= "easy"
+				and difficulty_filter:lower() ~= "medium"
+				and difficulty_filter:lower() ~= "hard"
+			then
+				vim.notify("Invalid difficulty. Please use Easy, Medium, or Hard.", vim.log.levels.ERROR)
+				return
+			end
+			for _, problem in ipairs(full_problem_list_cache) do
+				if
+					get_difficulty(problem.difficulty.level):lower() == difficulty_filter:lower()
+					and problem.paid_only == false
+				then
+					table.insert(filtered_problems, problem)
+				end
+			end
+		end
+
+		local files_in_dir = {}
+		for _, file in ipairs(vim.fn.readdir(vim.fn.getcwd())) do
+			files_in_dir[file] = true
+		end
+
+		local unsolved_problems = {}
+		for _, problem in ipairs(filtered_problems) do
+			local slug = problem.stat.question__title_slug
+			local filename = slug:gsub("-", "_") .. ".py" -- Assuming python for now
+			if not files_in_dir[filename] then
+				table.insert(unsolved_problems, problem)
+			end
+		end
+
+		if #unsolved_problems > 0 then
+			math.randomseed(os.time())
+			local random_index = math.random(#unsolved_problems)
+			local problem = unsolved_problems[random_index]
+			local slug = problem.stat.question__title_slug
+			vim.notify("Found random unsolved problem: " .. slug, vim.log.levels.INFO)
+			M.get_question(slug)
+		else
+			local message = "All "
+			if difficulty_filter and difficulty_filter:lower() ~= "all" then
+				message = message .. difficulty_filter .. " "
+			end
+			message = message .. "problems are already present in this directory."
+			vim.notify(message, vim.log.levels.INFO)
+		end
+	end
+
+	if #full_problem_list_cache == 0 then
+		vim.notify("Problem list is empty. Fetching from LeetCode...", vim.log.levels.INFO)
+		vim.schedule(function()
+			local response_body = http.get(PROBLEMS_API_URL)
+			if response_body and response_body ~= "" then
+				local data = vim.fn.json_decode(response_body)
+				if data and data.stat_status_pairs then
+					full_problem_list_cache = data.stat_status_pairs
+					find_random_unsolved_and_get()
+				else
+					vim.notify("Could not parse problem list from API response.", vim.log.levels.ERROR)
+				end
+			else
+				vim.notify("Failed to fetch problem list. Response was empty.", vim.log.levels.ERROR)
+			end
+		end)
+	else
+		find_random_unsolved_and_get()
+	end
+end
+
 function M.setup(opts)
 	config = vim.tbl_deep_extend("force", config, opts or {})
 	http.setup(config)
@@ -914,6 +1069,20 @@ function M.setup(opts)
 	vim.api.nvim_create_user_command("LeetCodeSubmissionDetails", function(opts)
 		M.get_submission_details(opts.args)
 	end, { nargs = 1 })
+	vim.api.nvim_create_user_command("LeetCodeInorder", function(opts)
+		if #opts.fargs == 0 then
+			vim.notify("Please provide a difficulty (Easy, Medium, Hard)", vim.log.levels.ERROR)
+			return
+		end
+		M.get_inorder_question(opts.fargs[1])
+	end, { nargs = "?", complete = function()
+		return table.concat({ "Easy", "Medium", "Hard" }, "\n")
+	end })
+	vim.api.nvim_create_user_command("LeetCodeRandom", function(opts)
+		M.get_random_question(opts.fargs[1])
+	end, { nargs = "?", complete = function()
+		return table.concat({ "Easy", "Medium", "Hard" }, "\n")
+	end })
 end
 
 return M

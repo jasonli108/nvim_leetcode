@@ -1070,11 +1070,11 @@ function M.setup(opts)
 		M.get_submission_details(opts.args)
 	end, { nargs = 1 })
 	vim.api.nvim_create_user_command("LeetCodeInorder", function(opts)
+		local difficulty = opts.fargs[1]
 		if #opts.fargs == 0 then
-			vim.notify("Please provide a difficulty (Easy, Medium, Hard)", vim.log.levels.ERROR)
-			return
+			difficulty = "Easy" -- Default to Easy
 		end
-		M.get_inorder_question(opts.fargs[1])
+		M.get_inorder_question(difficulty)
 	end, { nargs = "?", complete = function()
 		return table.concat({ "Easy", "Medium", "Hard" }, "\n")
 	end })

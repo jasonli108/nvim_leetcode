@@ -42,6 +42,8 @@ package.preload['nvim-leetcode.http'] = (function()
           },
         })
       end
+    elseif url:match("/submit/") then
+      return vim.fn.json_encode({ submission_id = 12345 })
     end
     return ""
   end

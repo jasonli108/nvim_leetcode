@@ -836,14 +836,14 @@ function M.submit_solution()
 	local all_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 	local start_line = -1
 	for i, line in ipairs(all_lines) do
-		if line:match("^class Solution:") then
+		if line:match("^class") then
 			start_line = i - 1 -- 0-indexed
 			break
 		end
 	end
 
 	if start_line == -1 then
-		vim.notify("Could not find 'class Solution:' in the buffer.", vim.log.levels.ERROR)
+		vim.notify("Could not find 'class' in the buffer.", vim.log.levels.ERROR)
 		return
 	end
 

@@ -8,14 +8,71 @@ function M.setup(opts)
   config = opts
 end
 
+local function detect_python_executable()
+  if config.python_executable then
+    return config.python_executable
+  end
+
+  -- Attempt to locate the plugin root directory based on this file's location
+  local str = debug.getinfo(1, "S").source:sub(2)
+  local script_path = vim.fn.fnamemodify(str, ":p:h") -- .../lua/nvim-leetcode
+  local project_root = vim.fn.fnamemodify(script_path, ":h:h") -- .../
+  local venv_python = project_root .. "/.venv/bin/python3"
+
+  if vim.fn.executable(venv_python) == 1 then
+    return venv_python
+  end
+
+  return "python3"
+end
+
 -- Tries to get cookies from a browser using a Python script.
 local function get_cookies_from_browser()
   local python_script = [[ 
 import browser_cookie3
 import json
 import sys
+import os
+
+def get_cookies_from_cj(cj):
+    session = ""
+    csrf = ""
+    cookie_parts = []
+    seen_cookies = set()
+    
+    for cookie in cj:
+        if "leetcode.com" in cookie.domain:
+            cookie_tuple = (cookie.name, cookie.value)
+            if cookie_tuple not in seen_cookies:
+                cookie_parts.append(f"{cookie.name}={cookie.value}")
+                seen_cookies.add(cookie_tuple)
+                
+            if cookie.name == "LEETCODE_SESSION":
+                session = cookie.value
+            elif cookie.name == "csrftoken":
+                csrf = cookie.value
+    
+    if session and csrf:
+        return {
+            "LEETCODE_SESSION": session,
+            "csrftoken": csrf,
+            "cookie_string": "; ".join(cookie_parts)
+        }
+    return None
 
 def get_cookies():
+    # 1. Try specific Chrome Canary path first
+    try:
+        cookie_file_path = os.path.expanduser("~/.config/google-chrome-canary/Default/Cookies")
+        if os.path.exists(cookie_file_path):
+            cj = browser_cookie3.chrome(cookie_file=cookie_file_path, domain_name="leetcode.com")
+            result = get_cookies_from_cj(cj)
+            if result:
+                return result
+    except Exception:
+        pass
+
+    # 2. Fallback to generic detection
     browsers_to_try = [
         browser_cookie3.chrome,
         browser_cookie3.firefox,
@@ -29,14 +86,10 @@ def get_cookies():
 
     for browser_func in browsers_to_try:
         try:
-            cj = browser_func(domain_name=".leetcode.com")
-            cookies = {}
-            for cookie in cj:
-                if cookie.name in ["LEETCODE_SESSION", "csrftoken"]:
-                    cookies[cookie.name] = cookie.value
-            
-            if "LEETCODE_SESSION" in cookies and "csrftoken" in cookies:
-                return cookies
+            cj = browser_func(domain_name="leetcode.com")
+            result = get_cookies_from_cj(cj)
+            if result:
+                return result
         except Exception:
             continue
     
@@ -54,7 +107,7 @@ except Exception as e:
     sys.exit(1)
 ]]
 
-  local python_executable = config.python_executable or "python3"
+  local python_executable = detect_python_executable()
   local command = python_executable .. " -c " .. vim.fn.shellescape(python_script)
   local result = vim.fn.system(command)
 
@@ -66,30 +119,42 @@ except Exception as e:
   return vim.fn.json_decode(result)
 end
 
--- Gets the full cookie string from config, env var, or browser.
-local function get_cookie_string()
+-- Gets the full cookie data (string and csrf) from config, env var, or browser.
+local function get_cookie_data()
   -- 1. Prioritize manually configured cookie_string
   if config.cookie_string and config.cookie_string ~= "" then
-    return config.cookie_string
+    local csrf = string.match(config.cookie_string, "csrftoken=([^;]+)")
+    return config.cookie_string, csrf
   end
 
   -- 2. Fallback to environment variable
   local cookie_env = os.getenv("LEETCODE_COOKIE_STRING")
   if cookie_env and cookie_env ~= "" then
-    return cookie_env
+    local csrf = os.getenv("CSRF_TOKEN")
+    if not csrf then
+        csrf = string.match(cookie_env, "csrftoken=([^;]+)")
+    end
+    return cookie_env, csrf
   end
 
   -- 3. Fallback to automatic browser detection
   local browser_cookies = get_cookies_from_browser()
-  if browser_cookies and browser_cookies.LEETCODE_SESSION and browser_cookies.csrftoken then
-    return string.format("LEETCODE_SESSION=%s; csrftoken=%s", browser_cookies.LEETCODE_SESSION, browser_cookies.csrftoken)
+  if browser_cookies then
+    local cookie_str = browser_cookies.cookie_string
+    if not cookie_str and browser_cookies.LEETCODE_SESSION and browser_cookies.csrftoken then
+        cookie_str = string.format("LEETCODE_SESSION=%s; csrftoken=%s", browser_cookies.LEETCODE_SESSION, browser_cookies.csrftoken)
+    end
+    
+    if cookie_str then
+        return cookie_str, browser_cookies.csrftoken
+    end
   end
 
-  return nil
+  return nil, nil
 end
 
 function M.get(url)
-  local cookie_string = get_cookie_string()
+  local cookie_string, _ = get_cookie_data()
   if not cookie_string then
     vim.notify("LeetCode cookies are not configured. Please set 'cookie_string' in setup.", vim.log.levels.ERROR)
     return ""
@@ -120,15 +185,14 @@ function M.get(url)
 end
 
 function M.post(url, body)
-  local cookie_string = get_cookie_string()
+  local cookie_string, csrf_token = get_cookie_data()
   if not cookie_string then
     vim.notify("LeetCode cookies are not configured. Please set 'cookie_string' in setup.", vim.log.levels.ERROR)
     return ""
   end
 
-  -- Extract csrftoken from the cookie string for the x-csrftoken header
-  local csrf_token = nil
-  if cookie_string then
+  if not csrf_token then
+    -- Try to extract if not returned explicitly
     csrf_token = string.match(cookie_string, "csrftoken=([^;]+)")
   end
 
